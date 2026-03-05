@@ -6,8 +6,11 @@ import qupath.lib.images.servers.ImageServerBuilder;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -46,23 +49,48 @@ public class OrthancImageServerBuilder implements ImageServerBuilder<BufferedIma
 
     @Override
     public ImageServer<BufferedImage> buildServer(URI uri, String... args) throws Exception {
-        String host = uri.getHost();
-        int port = uri.getPort();
-        if (port == -1) port = 80;
-        // Le path est "/series/{seriesId}"
         String seriesId = uri.getPath().replaceFirst("^/series/", "");
-        String baseUrl = "http://" + host + ":" + port;
+
+        Map<String, String> params = parseQuery(uri.getQuery());
+
+        String baseUrl;
+        if (params.containsKey("base")) {
+            baseUrl = URLDecoder.decode(params.get("base"), StandardCharsets.UTF_8);
+        } else {
+            String host = uri.getHost();
+            int port = uri.getPort();
+            if (port == -1) port = 80;
+            baseUrl = "http://" + host + ":" + port;
+        }
 
         OrthancClient client;
-        String userInfo = uri.getUserInfo();
-        if (userInfo != null && userInfo.contains(":")) {
-            String[] parts = userInfo.split(":", 2);
-            client = new OrthancClient(baseUrl, parts[0], parts[1]);
+        if (params.containsKey("user")) {
+            String user = URLDecoder.decode(params.get("user"), StandardCharsets.UTF_8);
+            String pass = URLDecoder.decode(params.getOrDefault("pass", ""), StandardCharsets.UTF_8);
+            client = new OrthancClient(baseUrl, user, pass);
         } else {
-            client = new OrthancClient(baseUrl);
+            String userInfo = uri.getUserInfo();
+            if (userInfo != null && userInfo.contains(":")) {
+                String[] parts = userInfo.split(":", 2);
+                client = new OrthancClient(baseUrl, parts[0], parts[1]);
+            } else {
+                client = new OrthancClient(baseUrl);
+            }
         }
 
         return new OrthancImageServer(client, seriesId);
+    }
+
+    private static Map<String, String> parseQuery(String query) {
+        Map<String, String> params = new LinkedHashMap<>();
+        if (query == null || query.isEmpty()) return params;
+        for (String pair : query.split("&")) {
+            int idx = pair.indexOf('=');
+            if (idx > 0) {
+                params.put(pair.substring(0, idx), pair.substring(idx + 1));
+            }
+        }
+        return params;
     }
 
     @Override

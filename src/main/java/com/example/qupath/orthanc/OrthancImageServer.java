@@ -15,6 +15,8 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Collections;
 
@@ -48,6 +50,7 @@ public class OrthancImageServer extends AbstractTileableImageServer {
                 .preferredTileSize(pyramidInfo.tileWidth, pyramidInfo.tileHeight)
                 .levelsFromDownsamples(downsamples)
                 .channels(ImageChannel.getDefaultRGBChannels())
+                .rgb(true)
                 .pixelType(PixelType.UINT8)
                 .build();
 
@@ -118,22 +121,21 @@ public class OrthancImageServer extends AbstractTileableImageServer {
         return Collections.singletonList(buildURI());
     }
 
-    /**
-     * Construit l'URI qui identifie ce serveur.
-     * Format : orthanc://[user:pass@]host:port/series/{seriesId}
-     */
     private URI buildURI() {
         try {
             java.net.URL url = new java.net.URL(client.getBaseUrl());
             String host = url.getHost();
             int port = url.getPort() == -1 ? url.getDefaultPort() : url.getPort();
 
-            String userInfo = "";
+            String encodedBase = URLEncoder.encode(client.getBaseUrl(), StandardCharsets.UTF_8);
+            String query = "base=" + encodedBase;
+
             if (client.getUsername() != null && !client.getUsername().isEmpty()) {
-                userInfo = client.getUsername() + ":" + client.getPassword() + "@";
+                query += "&user=" + URLEncoder.encode(client.getUsername(), StandardCharsets.UTF_8)
+                       + "&pass=" + URLEncoder.encode(client.getPassword(), StandardCharsets.UTF_8);
             }
 
-            return URI.create("orthanc://" + userInfo + host + ":" + port + "/series/" + seriesId);
+            return new URI("orthanc", null, host, port, "/series/" + seriesId, query, null);
         } catch (Exception e) {
             return URI.create("orthanc://unknown/series/" + seriesId);
         }
