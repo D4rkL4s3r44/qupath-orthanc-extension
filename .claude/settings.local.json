@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(jar tf:*)",
+      "Bash(gradle compileJava:*)",
+      "Bash(gradle build:*)",
+      "Bash(jar xf:*)",
+      "WebSearch",
+      "WebFetch(domain:orthanc.uclouvain.be)",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

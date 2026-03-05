@@ -343,14 +343,14 @@ public class EnhancedOrthancImportDialog extends Dialog<EnhancedOrthancImportDia
     }
     
     /**
-     * Importe toute une série — retourne les IDs et le client, le téléchargement
-     * se fait dans le thread de fond d'addSeriesToProject()
+     * Importe toute une série via le plugin WSI — retourne l'ID de série et le client.
+     * Aucun téléchargement ici : les tuiles seront récupérées à la demande par OrthancImageServer.
      */
     private OrthancImportResult importWholeSeries(OrthancClient.OrthancSeries series) {
         String seriesName = series.getSeriesDescription().isEmpty()
-            ? "orthanc_series_" + series.getId()
-            : series.getSeriesDescription();
-        return new OrthancImportResult(series.getInstanceIds(), client, seriesName);
+                ? "orthanc_series_" + series.getId()
+                : series.getSeriesDescription();
+        return new OrthancImportResult(series.getId(), client, seriesName);
     }
     
     /**
@@ -369,34 +369,34 @@ public class EnhancedOrthancImportDialog extends Dialog<EnhancedOrthancImportDia
      * Classe pour retourner le résultat de l'import
      */
     public static class OrthancImportResult {
-        private final List<File> dicomFiles;       // pour instance unique
-        private final List<String> instanceIds;    // pour série
-        private final OrthancClient client;        // pour série
+        private final List<File> dicomFiles;   // pour instance unique
+        private final String seriesId;         // pour série WSI
+        private final OrthancClient client;    // pour série WSI
         private final String seriesName;
         private final boolean isWholeSeries;
 
         // Constructeur pour instance unique
         public OrthancImportResult(List<File> dicomFiles, String seriesName, boolean isWholeSeries) {
             this.dicomFiles = dicomFiles;
-            this.instanceIds = null;
+            this.seriesId = null;
             this.client = null;
             this.seriesName = seriesName;
             this.isWholeSeries = isWholeSeries;
         }
 
-        // Constructeur pour série (pas de pré-téléchargement)
-        public OrthancImportResult(List<String> instanceIds, OrthancClient client, String seriesName) {
+        // Constructeur pour série WSI (pas de téléchargement, tuiles à la demande)
+        public OrthancImportResult(String seriesId, OrthancClient client, String seriesName) {
             this.dicomFiles = null;
-            this.instanceIds = instanceIds;
+            this.seriesId = seriesId;
             this.client = client;
             this.seriesName = seriesName;
             this.isWholeSeries = true;
         }
 
-        public List<File> getDicomFiles()    { return dicomFiles; }
-        public List<String> getInstanceIds() { return instanceIds; }
-        public OrthancClient getClient()     { return client; }
-        public String getSeriesName()        { return seriesName; }
-        public boolean isWholeSeries()       { return isWholeSeries; }
+        public List<File> getDicomFiles()  { return dicomFiles; }
+        public String getSeriesId()        { return seriesId; }
+        public OrthancClient getClient()   { return client; }
+        public String getSeriesName()      { return seriesName; }
+        public boolean isWholeSeries()     { return isWholeSeries; }
     }
 }

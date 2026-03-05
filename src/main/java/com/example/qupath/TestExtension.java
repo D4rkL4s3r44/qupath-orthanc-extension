@@ -1,32 +1,29 @@
 package com.example.qupath;
 
 import javafx.application.Platform;
-import javafx.geometry.Insets;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.ButtonType;
-import javafx.scene.control.ButtonBar;
-import javafx.scene.control.ProgressBar;
-import javafx.scene.control.Label;
 import javafx.scene.control.TextInputDialog;
-import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.extensions.QuPathExtension;
 import qupath.lib.images.ImageData;
+import qupath.lib.images.servers.ImageServerBuilder;
 import qupath.lib.images.servers.ImageServerProvider;
 import qupath.lib.projects.Project;
 import qupath.lib.projects.ProjectImageEntry;
 import qupath.lib.projects.Projects;
 import com.example.qupath.orthanc.EnhancedOrthancImportDialog;
+import com.example.qupath.orthanc.OrthancImageServer;
+import com.example.qupath.orthanc.OrthancImageServerBuilder;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
 import java.util.Optional;
+import java.util.ServiceLoader;
 
 /**
  * Extension QuPath avec import DICOM simplifié depuis Orthanc
@@ -35,6 +32,11 @@ public class TestExtension implements QuPathExtension {
     
     @Override
     public void installExtension(QuPathGUI qupath) {
+        // Enregistrer OrthancImageServerBuilder dans le ServiceLoader de QuPath
+        // (nécessaire car les extensions sont chargées après l'initialisation du ServiceLoader)
+        ImageServerProvider.setServiceLoader(
+                ServiceLoader.load(ImageServerBuilder.class, OrthancImageServerBuilder.class.getClassLoader()));
+
         // Créer un menu principal
         Menu menu = new Menu("Extension Orthanc");
         
@@ -302,129 +304,40 @@ public class TestExtension implements QuPathExtension {
     }
     
     /**
-     * Ajoute toutes les images d'une série au projet avec barre de progression
+     * Ajoute une série WSI au projet en utilisant OrthancImageServer.
+     * Aucun téléchargement : les tuiles sont récupérées à la demande depuis Orthanc.
      */
-    private void addSeriesToProject(QuPathGUI qupath, Project<BufferedImage> project, 
+    private void addSeriesToProject(QuPathGUI qupath, Project<BufferedImage> project,
                                      EnhancedOrthancImportDialog.OrthancImportResult importResult) {
-        
-        int totalImages = importResult.getInstanceIds().size();
-
-        // Créer un dialog de progression
-        Alert progressDialog = new Alert(AlertType.INFORMATION);
-        progressDialog.setTitle("Import en cours");
-        progressDialog.setHeaderText("Import de la série : " + importResult.getSeriesName());
-        
-        // Créer une barre de progression
-        ProgressBar progressBar = new ProgressBar(0);
-        progressBar.setPrefWidth(400);
-        
-        Label statusLabel = new Label("Préparation de l'import...");
-        
-        VBox progressBox = new VBox(10);
-        progressBox.getChildren().addAll(statusLabel, progressBar);
-        progressBox.setPadding(new Insets(20));
-        
-        progressDialog.getDialogPane().setContent(progressBox);
-        
-        // Bouton annuler
-        ButtonType cancelButton = new ButtonType("Annuler", ButtonBar.ButtonData.CANCEL_CLOSE);
-        progressDialog.getButtonTypes().setAll(cancelButton);
-        
-        // Flag pour l'annulation
-        final boolean[] cancelled = {false};
-        
-        progressDialog.setOnCloseRequest(e -> {
-            cancelled[0] = true;
-        });
-        
-        // Afficher le dialog sans bloquer
-        progressDialog.show();
-        
-        // Import en arrière-plan : téléchargement ET ajout par instance
         new Thread(() -> {
-            int successCount = 0;
-
             try {
-                for (int i = 0; i < totalImages && !cancelled[0]; i++) {
-                    String instanceId = importResult.getInstanceIds().get(i);
-                    String imageName = importResult.getSeriesName() + "_" + (i + 1);
+                OrthancImageServer server = new OrthancImageServer(
+                        importResult.getClient(), importResult.getSeriesId());
+                var builder = server.getServerBuilder();
+                server.close();
 
-                    final int currentIndex = i + 1;
-                    Platform.runLater(() -> {
-                        statusLabel.setText(String.format("Téléchargement %d/%d...", currentIndex, totalImages));
-                        progressBar.setProgress((double) currentIndex / totalImages);
-                    });
-
-                    try {
-                        // Télécharger le PNG dans le thread de fond
-                        File tempFile = File.createTempFile("orthanc_series_" + i + "_", ".png");
-                        try (InputStream is = importResult.getClient().downloadInstanceRendered(instanceId);
-                             FileOutputStream fos = new FileOutputStream(tempFile)) {
-                            byte[] buffer = new byte[8192];
-                            int bytesRead;
-                            while ((bytesRead = is.read(buffer)) != -1) {
-                                fos.write(buffer, 0, bytesRead);
-                            }
-                        }
-
-                        // Ajouter au projet
-                        var uris = ImageServerProvider.getPreferredUriImageSupport(
-                            BufferedImage.class, tempFile.getAbsolutePath());
-                        if (uris != null && !uris.getBuilders().isEmpty()) {
-                            var builder = uris.getBuilders().get(0);
-                            ProjectImageEntry<BufferedImage> entry = project.addImage(builder);
-                            entry.setImageName(imageName);
-                            successCount++;
-                        } else {
-                            System.err.println("Aucun serveur d'image pour : " + imageName);
-                        }
-                    } catch (Exception e) {
-                        System.err.println("Erreur instance " + instanceId + " : " + e.getMessage());
-                    }
-                }
-                
+                ProjectImageEntry<BufferedImage> entry = project.addImage(builder);
+                entry.setImageName(importResult.getSeriesName());
                 project.syncChanges();
-                
-                final int finalSuccessCount = successCount;
-                final boolean wasCancelled = cancelled[0];
-                
+
                 Platform.runLater(() -> {
-                    progressDialog.close();
-
-                    // Rafraîchir le panneau projet pour afficher toutes les images ajoutées
                     qupath.refreshProject();
-
-                    if (wasCancelled) {
-                        showAlert("Import annulé",
-                            "Import annulé par l'utilisateur.\n\n" +
-                            "Images importées : " + finalSuccessCount + "/" + totalImages + "\n" +
-                            "Série : " + importResult.getSeriesName()
-                        );
-                    } else {
-                        showAlert("Import réussi",
+                    try {
+                        qupath.openImageEntry(entry);
+                    } catch (Exception e) {
+                        System.err.println("Erreur ouverture image : " + e.getMessage());
+                    }
+                    showAlert("Import réussi",
                             "Série importée avec succès !\n\n" +
-                            "Images ajoutées : " + finalSuccessCount + "/" + totalImages + "\n" +
                             "Série : " + importResult.getSeriesName() + "\n" +
                             "Projet : " + project.getName()
-                        );
-                    }
-
-                    // Ouvrir la première image
-                    if (finalSuccessCount > 0) {
-                        try {
-                            qupath.openImageEntry(project.getImageList().get(project.getImageList().size() - finalSuccessCount));
-                        } catch (Exception e) {
-                            System.err.println("Erreur lors de l'ouverture de la première image : " + e.getMessage());
-                        }
-                    }
+                    );
                 });
-                
+
             } catch (Exception e) {
                 e.printStackTrace();
-                Platform.runLater(() -> {
-                    progressDialog.close();
-                    showAlert("Erreur", "Erreur lors de l'ajout de la série au projet :\n" + e.getMessage());
-                });
+                Platform.runLater(() ->
+                        showAlert("Erreur", "Erreur lors de l'import de la série :\n" + e.getMessage()));
             }
         }).start();
     }

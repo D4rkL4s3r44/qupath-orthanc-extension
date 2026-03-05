@@ -20,22 +20,29 @@ public class OrthancClient {
     private final OkHttpClient httpClient;
     private final Gson gson;
     private final String credentials;
-    
+    private final String username;
+    private final String password;
+
     /**
      * Constructeur pour un serveur Orthanc sans authentification
      */
     public OrthancClient(String baseUrl) {
         this(baseUrl, null, null);
     }
-    
+
     /**
      * Constructeur pour un serveur Orthanc avec authentification
      */
     public OrthancClient(String baseUrl, String username, String password) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-        this.httpClient = new OkHttpClient();
+        this.httpClient = new OkHttpClient.Builder()
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
         this.gson = new Gson();
-        
+        this.username = username;
+        this.password = password;
+
         if (username != null && password != null) {
             String auth = username + ":" + password;
             this.credentials = "Basic " + Base64.getEncoder().encodeToString(auth.getBytes());
@@ -222,6 +229,74 @@ public class OrthancClient {
         return response.body().byteStream();
     }
 
+    public String getBaseUrl() { return baseUrl; }
+    public String getUsername() { return username; }
+    public String getPassword() { return password; }
+
+    /**
+     * Récupère les informations de la pyramide WSI d'une série via le plugin WSI d'Orthanc.
+     * Endpoint : GET /wsi/pyramids/{seriesId}
+     */
+    public WsiPyramidInfo getWsiPyramidInfo(String seriesId) throws IOException {
+        Request.Builder requestBuilder = new Request.Builder()
+                .url(baseUrl + "/wsi/pyramids/" + seriesId)
+                .get();
+        if (credentials != null) requestBuilder.header("Authorization", credentials);
+
+        try (Response response = httpClient.newCall(requestBuilder.build()).execute()) {
+            if (!response.isSuccessful())
+                throw new IOException("Impossible de récupérer la pyramide WSI (série " + seriesId + "): " + response.code());
+
+            String body = response.body().string();
+            try {
+                JsonObject json = gson.fromJson(body, JsonObject.class);
+                // "Resolutions" = tableau de facteurs de zoom, un par niveau (ex: [1, 2, 4, 8])
+                JsonArray resolutions = json.getAsJsonArray("Resolutions");
+                int nLevels = resolutions.size();
+                // Taille des tuiles : format "TilesSizes" (array par niveau) ou "TileWidth"/"TileHeight" (entiers)
+                int tw, th;
+                if (json.has("TilesSizes")) {
+                    JsonArray firstTileSize = json.getAsJsonArray("TilesSizes").get(0).getAsJsonArray();
+                    tw = firstTileSize.get(0).getAsInt();
+                    th = firstTileSize.get(1).getAsInt();
+                } else {
+                    tw = json.get("TileWidth").getAsInt();
+                    th = json.get("TileHeight").getAsInt();
+                }
+                // "Sizes" = tableau de [largeur, hauteur] de l'image par niveau
+                JsonArray sizes = json.getAsJsonArray("Sizes");
+                int[] w = new int[nLevels];
+                int[] h = new int[nLevels];
+                for (int i = 0; i < nLevels; i++) {
+                    JsonArray sizeAtLevel = sizes.get(i).getAsJsonArray();
+                    w[i] = sizeAtLevel.get(0).getAsInt();
+                    h[i] = sizeAtLevel.get(1).getAsInt();
+                }
+                return new WsiPyramidInfo(nLevels, tw, th, w, h);
+            } catch (Exception e) {
+                throw new IOException("Structure JSON inattendue pour /wsi/pyramids/" + seriesId
+                        + "\nJSON recu : " + body);
+            }
+        }
+    }
+
+    /**
+     * Télécharge une tuile de la pyramide WSI.
+     * Endpoint : GET /wsi/pyramids/{seriesId}/tiles/{level}/{col}/{row}
+     */
+    public byte[] getWsiTile(String seriesId, int level, int col, int row) throws IOException {
+        // Endpoint officiel Orthanc WSI : /wsi/tiles/{seriesId}/{z}/{x}/{y}
+        String url = baseUrl + "/wsi/tiles/" + seriesId + "/" + level + "/" + col + "/" + row;
+        Request.Builder requestBuilder = new Request.Builder().url(url).get();
+        if (credentials != null) requestBuilder.header("Authorization", credentials);
+
+        try (Response response = httpClient.newCall(requestBuilder.build()).execute()) {
+            if (!response.isSuccessful())
+                throw new IOException("Tuile introuvable (" + level + "," + col + "," + row + "): " + response.code());
+            return response.body().bytes();
+        }
+    }
+
     /**
      * Télécharge une image PNG pré-rendue depuis Orthanc (décode le DICOM côté serveur)
      */
@@ -243,6 +318,25 @@ public class OrthancClient {
         }
 
         return response.body().byteStream();
+    }
+
+    /**
+     * Informations sur la pyramide WSI d'une série (réponse de /wsi/pyramids/{seriesId})
+     */
+    public static class WsiPyramidInfo {
+        public final int levels;
+        public final int tileWidth;
+        public final int tileHeight;
+        public final int[] totalWidth;
+        public final int[] totalHeight;
+
+        public WsiPyramidInfo(int levels, int tileWidth, int tileHeight, int[] totalWidth, int[] totalHeight) {
+            this.levels = levels;
+            this.tileWidth = tileWidth;
+            this.tileHeight = tileHeight;
+            this.totalWidth = totalWidth;
+            this.totalHeight = totalHeight;
+        }
     }
 
     /**
