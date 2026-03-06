@@ -44,6 +44,7 @@ dependencies {
 }
 
 jar {
+    archiveVersion = '1.0'
     manifest {
         attributes(
             'Implementation-Title': project.name,

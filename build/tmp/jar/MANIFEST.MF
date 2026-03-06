@@ -1,4 +1,4 @@
 Manifest-Version: 1.0
-Implementation-Title: qupath-extension-test
+Implementation-Title: qupath-extension-orthanc
 Implementation-Version: 0.3.1
 
