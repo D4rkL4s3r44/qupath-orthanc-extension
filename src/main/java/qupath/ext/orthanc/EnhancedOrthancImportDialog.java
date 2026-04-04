@@ -15,6 +15,10 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
+import qupath.lib.gui.prefs.PathPrefs;
+import javafx.beans.property.StringProperty;
+import javafx.beans.property.BooleanProperty;
+
 /**
  * Dialog for importing DICOM images from Orthanc.
  * Supports single instance import and full WSI series import.
@@ -35,6 +39,14 @@ public class EnhancedOrthancImportDialog extends Dialog<EnhancedOrthancImportDia
 
     private OrthancClient client;
 
+    // Persistent: These will be remembered next time QuPath is opened
+    private static final StringProperty PREF_URL = PathPrefs.createPersistentPreference("orthanc.url", "http://localhost:8042");
+    private static final StringProperty PREF_USERNAME = PathPrefs.createPersistentPreference("orthanc.username", "");
+    private static final BooleanProperty PREF_USE_AUTH = PathPrefs.createPersistentPreference("orthanc.use.auth", false);
+
+    // Transient: This stays in memory for the current session only
+    private static String orthancPasswString = "";
+
     public EnhancedOrthancImportDialog() {
         setTitle(Messages.get("dialog.title"));
         setHeaderText(Messages.get("dialog.header"));
@@ -54,18 +66,23 @@ public class EnhancedOrthancImportDialog extends Dialog<EnhancedOrthancImportDia
         connectionPane.setVgap(10);
 
         Label urlLabel = new Label(Messages.get("field.url"));
-        urlField = new TextField("http://localhost:8042");
+        urlField = new TextField(PREF_URL.get());
         urlField.setPrefWidth(300);
 
         authCheckBox = new CheckBox(Messages.get("field.auth"));
+        authCheckBox.setSelected(PREF_USE_AUTH.get());
 
         Label usernameLabel = new Label(Messages.get("field.username"));
-        usernameField = new TextField();
-        usernameField.setDisable(true);
+        usernameField = new TextField(PREF_USERNAME.get());
 
         Label passwordLabel = new Label(Messages.get("field.password"));
         passwordField = new PasswordField();
-        passwordField.setDisable(true);
+        passwordField.setText(orthancPasswString);
+
+        if (authCheckBox.isSelected() == false) {
+            usernameField.setDisable(true);
+            passwordField.setDisable(true);
+        }
 
         authCheckBox.setOnAction(e -> {
             boolean selected = authCheckBox.isSelected();
@@ -158,8 +175,10 @@ public class EnhancedOrthancImportDialog extends Dialog<EnhancedOrthancImportDia
 
     private void connectToOrthanc() {
         String url = urlField.getText().trim();
-        String username = authCheckBox.isSelected() ? usernameField.getText().trim() : null;
-        String password = authCheckBox.isSelected() ? passwordField.getText() : null;
+        boolean useAuth = authCheckBox.isSelected();
+        String username = useAuth ? usernameField.getText().trim() : null;
+        String password = useAuth ? passwordField.getText() : null;
+
 
         if (url.isEmpty()) {
             showError(Messages.get("error.emptyUrl"), Messages.get("error.emptyUrlContent"));
@@ -179,6 +198,15 @@ public class EnhancedOrthancImportDialog extends Dialog<EnhancedOrthancImportDia
             boolean connected = client.testConnection();
             Platform.runLater(() -> {
                 if (connected) {
+                    // Update preferences on successful connection
+                    PREF_URL.set(url);
+                    PREF_USE_AUTH.set(useAuth);
+                
+                    if (useAuth) {
+                        PREF_USERNAME.set(username);
+                        orthancPasswString = password;
+                    }
+
                     statusLabel.setText(Messages.get("status.connected"));
                     statusLabel.setStyle("-fx-text-fill: green; -fx-font-style: italic;");
                     loadStudies();

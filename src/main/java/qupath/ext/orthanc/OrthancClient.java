@@ -272,7 +272,17 @@ public class OrthancClient {
                     w[i] = sizeAtLevel.get(0).getAsInt();
                     h[i] = sizeAtLevel.get(1).getAsInt();
                 }
-                return new WsiPyramidInfo(nLevels, tw, th, w, h);
+                // --- Calculate Pixel Sizes ---
+                double pw = 0;
+                double ph = 0;
+                if (json.has("ImagedVolumeWidth") && json.has("TotalWidth")) {
+                    pw = (json.get("ImagedVolumeWidth").getAsDouble() / json.get("TotalWidth").getAsDouble()) * 1000.0;
+                }
+                if (json.has("ImagedVolumeHeight") && json.has("TotalHeight")) {
+                    ph = (json.get("ImagedVolumeHeight").getAsDouble() / json.get("TotalHeight").getAsDouble()) * 1000.0;
+                }
+                return new WsiPyramidInfo(nLevels, tw, th, w, h, pw, ph);
+
             } catch (Exception e) {
                 throw new IOException("Structure JSON inattendue pour /wsi/pyramids/" + seriesId
                         + "\nJSON recu : " + body);
@@ -329,13 +339,17 @@ public class OrthancClient {
         public final int tileHeight;
         public final int[] totalWidth;
         public final int[] totalHeight;
+        public final double pixelWidthMicrons;
+        public final double pixelHeightMicrons;
 
-        public WsiPyramidInfo(int levels, int tileWidth, int tileHeight, int[] totalWidth, int[] totalHeight) {
+        public WsiPyramidInfo(int levels, int tileWidth, int tileHeight, int[] totalWidth, int[] totalHeight, double pixelWidthMicrons, double pixelHeightMicrons) {
             this.levels = levels;
             this.tileWidth = tileWidth;
             this.tileHeight = tileHeight;
             this.totalWidth = totalWidth;
             this.totalHeight = totalHeight;
+            this.pixelWidthMicrons = pixelWidthMicrons;
+            this.pixelHeightMicrons = pixelHeightMicrons;
         }
     }
 

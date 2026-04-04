@@ -4,6 +4,7 @@ import qupath.lib.images.servers.AbstractTileableImageServer;
 import qupath.lib.images.servers.ImageChannel;
 import qupath.lib.images.servers.ImageServerBuilder;
 import qupath.lib.images.servers.ImageServerMetadata;
+import qupath.lib.images.servers.PixelCalibration;
 import qupath.lib.images.servers.PixelType;
 import qupath.lib.images.servers.TileRequest;
 import qupath.lib.regions.RegionRequest;
@@ -51,6 +52,7 @@ public class OrthancImageServer extends AbstractTileableImageServer {
                 .channels(ImageChannel.getDefaultRGBChannels())
                 .rgb(true)
                 .pixelType(PixelType.UINT8)
+                .pixelSizeMicrons(pyramidInfo.pixelWidthMicrons, pyramidInfo.pixelHeightMicrons)
                 .build();
 
         setMetadata(originalMetadata);
